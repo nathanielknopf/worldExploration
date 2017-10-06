@@ -1,0 +1,628 @@
+<!doctype html> 
+<html lang="en"> 
+<head> 
+    <meta charset="UTF-8" />
+    <title>Comprehension Game</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="//cdn.jsdelivr.net/phaser/2.2.2/phaser.min.js"></script>
+    <script src="config.js"></script>
+    <style type="text/css">
+        body {
+            margin: 0
+        }
+    </style>
+    <style>
+        .task-box{
+            display: inline-flex;
+            width: 420px;
+            height: 120px;
+            border: 3px solid #000000;
+            margin: 3px;
+        }
+        .task-image {
+            display: inline-block;
+            width: 30px;
+            height: 60px;
+            margin: 3px;
+        }
+        .inventory-box {
+            display: inline-flex;
+            width: 150px;
+            height: 120px;
+            border: 3px solid #000000;
+        }
+        .pocket-image {
+            display: inline-block;
+            width: 30px;
+            height: 60px;
+            margin: 3px;
+        }
+        p.counter-label {
+            font-size: 1.25em;
+            font-family: "Arial";
+        }
+        p.score-label{
+            font-size: 1.5em;
+            font-family: "Arial";
+        }
+    </style>
+</head>
+
+<body>
+<script type="text/javascript">
+
+var socket = io('/qagame-nsp')
+
+var param = function(param) { 
+    param = param.replace(/[\[]/,"\\\[").replace(/[\]]/,"\\\]");
+    var regexS = "[\\?&]"+param+"=([^&#]*)"; 
+    var regex = new RegExp( regexS ); 
+    var tmpURL = window.location.href
+    var results = regex.exec( tmpURL ); 
+    console.log("param: " + param + ", URL: " + tmpURL)
+    if( results == null ) { 
+        return ""; 
+    } else { 
+        return results[1];    
+    } 
+}
+
+socket.emit('request', {workerId: param("workerId")})
+
+socket.on('redirect', function(extension){
+    var assignmentId = param("assignmentId")
+    var hitId = param("hitId")
+    var workerId = param("workerId")
+    var turkSubmitTo = param("turkSubmitTo")
+    var condition = param("condition")
+    var question_order = param("qord")
+    var destination = extension + '?condition=' + condition + '&qord=' + question_order + '&assignmentId=' + assignmentId + '&hitId=' + hitId + '&workerId=' + workerId + '&turkSubmitTo=' + turkSubmitTo
+    window.location.href = destination
+})
+
+var game = new Phaser.Game(720, 540, Phaser.CANVAS, '', { preload: preload, create: create, update: update })
+
+var condition = (param("condition") == "") ? "a" : param("condition")
+
+var player
+var facing = 'right'
+var cursors
+var pocket = {
+    rock: 1,
+    apple: 1,
+    lemon: 0,
+    grape: 0,
+    chicken: 0,
+    cow: 0,
+    pig: 0,
+    fish: 0,
+    whale: 0,
+    crab: 0
+}
+
+var groups = {
+    'fruits': ['apple', 'grape', 'lemon'],
+    'animals': ['cow', 'chicken', 'pig'],
+    'aquatics': ['fish', 'whale', 'crab'],
+    'all': ['apple', 'lemon', 'grape', 'cow', 'chicken', 'pig', 'fish', 'whale', 'crab'],
+    'pocket_objects': ['apple', 'lemon', 'grape', 'cow', 'chicken', 'pig', 'fish', 'whale', 'crab']
+}
+
+var rocks
+
+var trees
+var apples
+var lemons
+var grapes
+var tree_fruit_pairings = {
+    'green tree': 'apple',
+    'blue tree': 'grape',
+    'purple tree': 'lemon'
+}
+
+var mountains
+var cows
+var chickens
+var pigs
+var mountain_animal_pairings = {
+    'brown mountain': 'cow',
+    'green mountain': 'chicken',
+    'blue mountain': 'pig'
+}
+
+var ponds
+var fishes
+var whales
+var crabs
+var pond_aquatic_pairings = {
+    'red pond': 'fish',
+    'green pond': 'whale',
+    'blue pond': 'crab'
+}
+
+var tree_list = [{x:100, y:100, color:'green tree'}, {x:350, y:250, color:'purple tree'}, {x:600, y:400, color:'blue tree'}]
+var pond_list = [{x:350, y:100, color: 'red pond'}, {x:600, y: 250, color:'green pond'}, {x:100, y:400, color: 'blue pond'}]
+var mountain_list = [{x:600, y:100, color:'brown mountain'}, {x:100, y:250, color:'blue mountain'}, {x:350, y:400, color:'green mountain'}]
+
+var desired_items = []
+var task;
+
+socket.on('task', function(packet){
+    task = packet.task
+    console.log("new task: " + task)
+    if (groups[task]){
+        desired_items = groups[task]
+    }else{
+        desired_items = [task]
+    }
+    updateTaskBar()
+})
+
+function resetGame(){
+    console.log('resetting game...')
+
+    player.body.x = 40
+    player.body.y = 40 
+    player.facing = 'right'
+    player.scale.setTo(1, 1)
+    for (var i = 0; i < trees.children.length; i++){
+        trees.children[i].canSpawnFruit = true
+    }
+    for (var i = 0; i < rocks.children.length; i++){
+        rocks.children[i].kill()
+    }for (var i = 0; i < grapes.children.length; i++){
+        grapes.children[i].kill()
+    }for (var i = 0; i < apples.children.length; i++){
+        apples.children[i].kill()
+    }for (var i = 0; i < lemons.children.length; i++){
+        lemons.children[i].kill()
+    }
+    pocket.rock = 1
+    updatePocket()
+}
+
+function updateTaskBar(){
+    document.getElementById("task-img-one").src = (desired_items[0]) ? 'assets/' + desired_items[0] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-two").src = (desired_items[1]) ? 'assets/' + desired_items[1] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-three").src = (desired_items[2]) ? 'assets/' + desired_items[2] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-four").src = (desired_items[3]) ? 'assets/' + desired_items[3] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-five").src = (desired_items[4]) ? 'assets/' + desired_items[4] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-six").src = (desired_items[5]) ? 'assets/' + desired_items[5] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-seven").src = (desired_items[6]) ? 'assets/' + desired_items[6] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-eight").src = (desired_items[7]) ? 'assets/' + desired_items[7] + '.png' : 'assets/empty.png'
+    document.getElementById("task-img-nine").src = (desired_items[8]) ? 'assets/' + desired_items[8] + '.png' : 'assets/empty.png'
+}
+
+function preload() {
+    game.load.image('background', 'assets/background-small.png')
+    game.load.image('player', 'assets/player.png')
+    game.load.image('rock', 'assets/rock.png')
+
+    game.load.image('blue tree', 'assets/tree-blue.png')
+    game.load.image('green tree', 'assets/tree-green.png')
+    game.load.image('purple tree', 'assets/tree-purple.png')
+    game.load.image('apple', 'assets/apple.png')
+    game.load.image('lemon', 'assets/lemon.png')
+    game.load.image('grape', 'assets/grape.png')
+    
+    game.load.image('brown mountain', 'assets/mountains-brown.png')
+    game.load.image('green mountain', 'assets/mountains-green.png')
+    game.load.image('blue mountain', 'assets/mountains-blue.png')
+    game.load.image('cow', 'assets/cow.png')
+    game.load.image('chicken', 'assets/chicken.png')
+    game.load.image('pig', 'assets/pig.png')
+
+    game.load.image('blue pond', 'assets/pond-blue.png')
+    game.load.image('red pond', 'assets/pond-red.png')
+    game.load.image('green pond', 'assets/pond-green.png')
+    game.load.image('fish', 'assets/fish.png')
+    game.load.image('whale', 'assets/whale.png')
+    game.load.image('crab', 'assets/crab.png')
+}
+
+function create(){
+    game.physics.startSystem(Phaser.Physics.ARCADE)
+    game.add.sprite(0, 0, 'background')
+
+    cursors = game.input.keyboard.createCursorKeys()
+
+    trees = game.add.group()
+    trees.enableBody = true
+
+    for (var i = 0; i < tree_list.length; i++){
+        var tree = trees.create(tree_list[i].x, tree_list[i].y, tree_list[i].color)
+        tree.body.immovable = true
+    }
+
+    for (var i = 0; i < trees.children.length; i++){
+        trees.children[i].canSpawnFruit = true
+        trees.children[i].colorOfThisTree = tree_list[i].color
+    }
+
+    apples = game.add.group()
+    apples.enableBody = true
+
+    lemons = game.add.group()
+    lemons.enableBody = true
+
+    grapes = game.add.group()
+    grapes.enableBody = true
+
+    mountains = game.add.group()
+    mountains.enableBody = true
+
+    for (var i = 0; i < mountain_list.length; i++){
+        var mountain = mountains.create(mountain_list[i].x, mountain_list[i].y, mountain_list[i].color)
+        mountain.body.immovable = true
+    }
+
+    for (var i = 0; i < mountains.children.length; i++){
+        mountains.children[i].canSpawnAnimal = true
+        mountains.children[i].colorOfThisMountain = mountain_list[i].color
+    }
+
+    cows = game.add.group()
+    cows.enableBody = true
+
+    chickens = game.add.group()
+    chickens.enableBody = true
+
+    pigs = game.add.group()
+    pigs.enableBody = true
+
+    ponds = game.add.group()
+    ponds.enableBody = true
+
+    for (var i = 0; i < pond_list.length; i++){
+        var pond = ponds.create(pond_list[i].x, pond_list[i].y, pond_list[i].color)
+        pond.body.immovable = true
+    }
+
+    for (var i = 0; i < ponds.children.length; i++){
+        ponds.children[i].canSpawnAquatic = true
+        ponds.children[i].colorOfThisPond = pond_list[i].color
+    }
+
+    fishes = game.add.group()
+    fishes.enableBody = true
+
+    whales = game.add.group()
+    whales.enableBody = true
+
+    crabs = game.add.group()
+    crabs.enableBody = true
+
+    rocks = game.add.group()
+    rocks.enableBody = true
+
+    player = game.add.sprite(40, 40, 'player')
+    player.anchor.setTo(0.5, 0.5)
+    game.physics.arcade.enable(player)
+    player.body.collideWorldBounds = true
+    updatePocket()
+}
+
+function update(){
+
+    game.physics.arcade.overlap(player, rocks, collectItem, null, this)
+    game.physics.arcade.collide(rocks, rocks)
+    game.physics.arcade.collide(rocks, apples)
+    game.physics.arcade.collide(rocks, lemons)
+    game.physics.arcade.collide(rocks, grapes)
+    game.physics.arcade.collide(rocks, cows)
+    game.physics.arcade.collide(rocks, chickens)
+    game.physics.arcade.collide(rocks, pigs)
+    game.physics.arcade.collide(rocks, fishes)
+    game.physics.arcade.collide(rocks, whales)
+    game.physics.arcade.collide(rocks, crabs)
+
+    game.physics.arcade.collide(player, trees)
+    game.physics.arcade.overlap(rocks, trees, treeCollision, null, this)
+
+    game.physics.arcade.overlap(player, apples, collectItem, null, this)
+    game.physics.arcade.overlap(player, grapes, collectItem, null, this)
+    game.physics.arcade.overlap(player, lemons, collectItem, null, this)
+    game.physics.arcade.collide(apples, trees)
+    game.physics.arcade.collide(apples, mountains)
+    game.physics.arcade.collide(lemons, trees)
+    game.physics.arcade.collide(lemons, mountains)
+    game.physics.arcade.collide(grapes, trees)
+    game.physics.arcade.collide(grapes, mountains)
+
+    game.physics.arcade.overlap(apples, ponds, pondCollision, null, this)
+    game.physics.arcade.overlap(lemons, ponds, pondCollision, null, this)
+    game.physics.arcade.overlap(grapes, ponds, pondCollision, null, this)
+
+    game.physics.arcade.collide(player, mountains)
+    game.physics.arcade.overlap(rocks, mountains, mountainCollision, null, this)
+
+    game.physics.arcade.overlap(player, cows, collectItem, null, this)
+    game.physics.arcade.overlap(player, chickens, collectItem, null, this)
+    game.physics.arcade.overlap(player, pigs, collectItem, null, this)
+    game.physics.arcade.collide(cows, trees)
+    game.physics.arcade.collide(cows, mountains)
+    game.physics.arcade.collide(cows, ponds)
+    game.physics.arcade.collide(chickens, trees)
+    game.physics.arcade.collide(chickens, mountains)
+    game.physics.arcade.collide(chickens, ponds)
+    game.physics.arcade.collide(pigs, trees)
+    game.physics.arcade.collide(pigs, mountains)
+    game.physics.arcade.collide(pigs, ponds)
+
+    game.physics.arcade.collide(player, ponds)
+    game.physics.arcade.overlap(rocks, ponds, pondCollision, null, this)
+
+    game.physics.arcade.overlap(player, fishes, collectItem, null, this)
+    game.physics.arcade.overlap(player, whales, collectItem, null, this)
+    game.physics.arcade.overlap(player, crabs, collectItem, null, this)
+    game.physics.arcade.collide(fishes, trees)
+    game.physics.arcade.collide(fishes, mountains)
+    game.physics.arcade.collide(fishes, ponds)
+    game.physics.arcade.collide(whales, trees)
+    game.physics.arcade.collide(whales, mountains)
+    game.physics.arcade.collide(whales, ponds)
+    game.physics.arcade.collide(crabs, trees)
+    game.physics.arcade.collide(crabs, mountains)
+    game.physics.arcade.collide(crabs, ponds)
+
+    player.body.velocity.x = 0
+    player.body.velocity.y = 0
+
+    if(cursors.left.isDown || cursors.right.isDown){
+        if (cursors.left.isDown && cursors.right.isDown){
+            player.body.velocity.x = 0
+        } else if (cursors.left.isDown){
+            player.body.velocity.x = -150
+            if (facing == 'right'){
+                facing = 'left'
+                player.scale.setTo(-1, 1)
+            }
+        } else if (cursors.right.isDown){
+            player.body.velocity.x = 150
+            if (facing == 'left'){
+                facing = 'right'
+                player.scale.setTo(1, 1)
+            }
+        }
+    } else {
+        player.body.velocity.x = 0
+    }
+
+    if(cursors.up.isDown || cursors.down.isDown){
+        if (cursors.up.isDown && cursors.down.isDown){
+            player.body.velocity.y = 0
+        } else if (cursors.up.isDown){
+            player.body.velocity.y = -150
+        } else if (cursors.down.isDown){
+            player.body.velocity.y = 150
+        }
+    } else {
+        player.body.velocity.y = 0
+    }
+}
+// what sorts of data do we receive?
+    // workerID: MTurk worker ID
+    // task: what the current task is
+    // act: [thrown, grabbed] (note action is a keyword)
+    // obj (action is done upon): [rock, fruits, animals, aquatic creaters] (note object is a keyword)
+    // correct: bool (whether or not the correct task was performed)
+    // gave_up: bool (whether or not the turker gave up on the task)
+
+function treeCollision(rock, tree){
+    console.log("Tree collision")
+    socket.emit('action', {workerID: param("workerId"), task: task, act: 'shot', obj: 'tree', correct: false, gave_up: false})
+    rock.kill()
+    for (var i = 0; i < trees.children.length; i++){
+        if(trees.children[i].body.position.x == tree.x && trees.children[i].body.position.y == tree.y){
+            tree.x += 5
+            setTimeout(function(){
+                tree.x -= 5
+            }, 5)
+            setTimeout(function(){
+                tree.x += 5
+            }, 10)
+            setTimeout(function(){
+                tree.x -= 5
+            }, 15)
+            if(trees.children[i].canSpawnFruit){
+                var color = trees.children[i].colorOfThisTree
+                var fruit = tree_fruit_pairings[color]
+                if(desired_items.indexOf(fruit) >= 0){
+                    socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: fruit, correct: true, gave_up: false})
+                }else{
+                    socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: fruit, correct: false, gave_up: false})
+                }
+                socket.emit('request', {workerId: param("workerId")})
+                resetGame()
+            }
+        }
+    }
+}
+
+function mountainCollision(rock, mountain){
+    console.log("Mountain collision")
+    socket.emit('action', {workerID: param("workerId"), task: task, act: 'shot', obj: 'mountain', correct: false, gave_up: false})
+    rock.kill()
+    for (var i = 0; i < mountains.children.length; i++){
+        if(mountains.children[i].body.position.x == mountain.x && mountains.children[i].body.position.y == mountain.y){
+            mountain.x += 5
+            setTimeout(function(){
+                mountain.x -= 5
+            }, 5)
+            setTimeout(function(){
+                mountain.x += 5
+            }, 10)
+            setTimeout(function(){
+                mountain.x -= 5
+            }, 15)
+            if(mountains.children[i].canSpawnAnimal){
+                var color = mountains.children[i].colorOfThisMountain;
+                var animal = mountain_animal_pairings[color];
+                if(desired_items.indexOf(animal) >= 0){
+                    socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: animal, correct: true, gave_up: false})
+                }else{
+                    socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: animal, correct: false, gave_up: false})
+                }
+                socket.emit('request', {workerId: param("workerId")})
+                resetGame()
+            }
+        }
+    }
+}
+
+function pondCollision(item, pond){
+    console.log("Pond collision")
+    socket.emit('action', {workerID: param("workerId"), task: task, act: 'shot', obj: 'pond', correct: false, gave_up: false})
+    var numAquatics = 1
+    if(groups.fruits.indexOf(item.key) >= 0){
+        numAquatics = 3
+    }
+    item.kill()
+    for (var i = 0; i < ponds.children.length; i++){
+        if(ponds.children[i].body.position.x == pond.x && ponds.children[i].body.position.y == pond.y){
+            pond.x += 5
+            setTimeout(function(){
+                pond.x -= 5
+            }, 5)
+            setTimeout(function(){
+                pond.x += 5
+            }, 10)
+            setTimeout(function(){
+                pond.x -= 5
+            }, 15)
+            if(ponds.children[i].canSpawnAquatic){
+                var color = ponds.children[i].colorOfThisPond
+                var aquatic = pond_aquatic_pairings[color]
+                if(desired_items.indexOf(aquatic) >= 0){
+                    socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: aquatic, correct: true, gave_up: false})
+                }else{
+                    socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: animal, correct: false, gave_up: false})
+                }
+                socket.emit('request', {workerId: param("workerId")})
+                resetGame()
+            }
+        }
+    }
+}
+
+function shootPocket(to_shoot){
+    if(pocket[to_shoot] > 0){
+        console.log("Shooting " + to_shoot)
+        pocket[to_shoot] -= 1
+        var speed = (facing == 'right') ? 350 : -350
+        var offset = (facing == 'right') ? 30 : -80
+        var item
+        if(to_shoot == 'rock'){
+            item = rocks.create(player.x+offset, player.y, 'rock')
+        }else if(to_shoot == 'apple'){
+            item = apples.create(player.x+offset, player.y, 'apple')
+        }else if(to_shoot == 'lemon'){
+            item = lemons.create(player.x+offset, player.y, 'lemon')
+        }else if(to_shoot == 'grape'){
+            item = grapes.create(player.x+offset, player.y, 'grape')
+        }else if(to_shoot == 'cow'){
+            item = cows.create(player.x+offset, player.y, 'cow')
+        }else if(to_shoot == 'chicken'){
+            item = chickens.create(player.x+offset, player.y, 'chicken')
+        }else if(to_shoot == 'pig'){
+            item = pigs.create(player.x+offset, player.y, 'pig')
+        }else if(to_shoot == 'fish'){
+            item = fishes.create(player.x+offset, player.y, 'fish')
+        }else if(to_shoot == 'whale'){
+            item = whales.create(player.x+offset, player.y, 'whale')
+        }else if(to_shoot == 'crab'){
+            item = crabs.create(player.x+offset, player.y, 'crab')
+        }
+        item.body.velocity.x = speed
+        item.body.collideWorldBounds = true
+        updatePocket()
+        socket.emit('action', {workerID: param("workerId"), task: task, act: 'shot', obj: to_shoot, correct: false, gave_up: false})
+    }else{
+        console.log("Pocket devoid of " + to_shoot)
+        socket.emit('action', {workerID: param("workerId"), task: task, act: 'shot_empty', obj: to_shoot, correct: false, gave_up: false})
+    }
+}
+
+function spawnObject(object, x, y, n){
+    for(var i = 0; i < n; i++){
+        if(object == 'apple'){
+            var apple = apples.create(x, y, 'apple')
+        }else if(object == 'lemon'){
+            var lemon = lemons.create(x, y, 'lemon')
+        }else if(object == 'grape'){
+            var grape = grapes.create(x, y, 'grape')
+        }else if(object == 'cow'){
+            var cow = cows.create(x, y, 'cow')
+        }else if(object == 'chicken'){
+            var chicken = chickens.create(x, y, 'chicken')
+        }else if(object == 'pig'){
+            var pig = pigs.create(x, y, 'pig')
+        }else if(object == 'fish'){
+            var fish = fishes.create(x, y, 'fish')
+        }else if(object == 'whale'){
+            var whale = whales.create(x, y, 'whale')
+        }else if(object == 'crab'){
+            var crab = crabs.create(x, y, 'crab')
+        }
+        y+= 50
+    }
+}
+
+function updatePocket(){
+    if(pocket.rock > 0){
+        document.getElementById("rock-pic").src = 'assets/rock.png'
+        document.getElementById("rock-num").innerHTML = pocket.rock
+    }else{
+        document.getElementById("rock-pic").src = 'assets/empty.png'
+        document.getElementById("rock-num").innerHTML = ''
+    }
+    for(var i = 0; i < groups.pocket_objects.length; i++){
+        var object = groups.pocket_objects[i]
+        if (pocket[object] > 0){
+            document.getElementById("other-pic").src = 'assets/' + object + '.png'
+            document.getElementById("other-num").innerHTML = pocket[object]
+        }else{
+            document.getElementById("other-pic").src = 'assets/empty.png'
+            document.getElementById("other-num").innerHTML = ''
+        }
+    }
+}
+
+function collectItem(player, item){
+    console.log("Collected: " + item.key)
+    item.kill()
+    pocket[item.key] += 1
+    console.log(pocket)
+    if(item.key == 'rock'){
+        socket.emit('action', {workerID: param("workerId"), task: task, act: 'grabbed', obj: 'rock', correct: false, gave_up: false})
+    }
+    updatePocket()   
+}
+
+function giveUp(){
+    socket.emit('action', {workerID: param("workerId"), task: task, act: 'quit', obj: 'n/a', correct: true, gave_up: true})
+    socket.emit('request', {workerId: param("workerId")})
+    resetGame()
+}
+
+</script>
+
+<div class="inventory-box">
+    <div class="pocket-image"><img id="rock-pic" src="assets/empty.png" onclick="shootPocket('rock')" style="width:30px;height:30px;"><p class="counter-label" id="rock-num" align="center"></p></div>
+    <div class="pocket-image"><img id="other-pic" src="assets/empty.png" style="width:30px;height:30px;"><p class="counter-label" id="other-num" align="center"></p></div>
+</div>
+<div class="task-box">
+    <h3>Please find one of these items:</h3>
+    <div class="task-image"><img id="task-img-one" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-two" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-three" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-four" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-five" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-six" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-seven" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-eight" src="assets/empty.png" style="width:30px;height:30px;"></div>
+    <div class="task-image"><img id="task-img-nine" src="assets/empty.png" style="width:30px;height:30px;"></div>
+</div>
+<button onclick="giveUp()">Give up on this task</button>
+</body>
+</html>
